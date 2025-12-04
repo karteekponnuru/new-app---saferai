@@ -1,0 +1,23 @@
+import { Amplify } from '@aws-amplify/core';
+
+const cognitoAuthConfig = {
+  Auth: {
+    Cognito: {
+      userPoolId: 'ap-south-1_tJYrDS5NW',
+      userPoolClientId: '2643jfjr4492gpr6t5lbnoqnp9',
+      loginWith: {
+        oauth: {
+          domain: 'ap-south-1tjyrds5nw.auth.ap-south-1.amazoncognito.com',
+          scopes: ['openid', 'email', 'profile', 'aws.cognito.signin.user.admin'],
+          redirectSignIn: ['http://localhost:5173/'],
+          redirectSignOut: ['http://localhost:5173/'],
+          responseType: 'code',
+        }
+      }
+    }
+  }
+};
+
+Amplify.configure(cognitoAuthConfig );
+
+export default cognitoAuthConfig;
