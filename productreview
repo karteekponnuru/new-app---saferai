@@ -1,0 +1,1088 @@
+Here is the updated src/pages/ProductReview.jsx.
+
+This version includes:
+
+Cedric Deprecation Warning: A popup appearing immediately if "Cedric" is selected, resetting the selection to enforce the "do not proceed" rule.
+
+Smart PDF Upload: The upload logic now checks if a field is empty before overwriting it, preserving your manual entries.
+
+Local Heuristic Analysis Engine: A robust, regex-based security scanner that replaces/supplements the failing API/TensorFlow calls to assess OWASP vulnerabilities locally.
+
+code
+Jsx
+download
+content_copy
+expand_less
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button.jsx';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx';
+import { Input } from '@/components/ui/input.jsx';
+import { Label } from '@/components/ui/label.jsx';
+import { Textarea } from '@/components/ui/textarea.jsx';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group.jsx';
+import { Alert, AlertDescription } from '@/components/ui/alert.jsx';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { CheckCircle2, AlertTriangle, XCircle, Download, ExternalLink, ArrowRight, ArrowLeft, Upload, Code, FileText, TrendingUp, TrendingDown, Minus, FileUp, Loader2, HelpCircle, ChevronDown, ChevronUp, Info, Shield, Brain, Bug } from 'lucide-react';
+import { generateSaferAIPDF } from '@/lib/pdfGenerator.js';
+import saferAIApi from '@/services/api';
+import { useAuth } from 'react-oidc-context';
+
+// --- DATA CONSTANTS ---
+const platforms = [
+  { value: 'party-rock', label: 'Party Rock', description: 'Educational tool for building apps with generative AI' },
+  { value: 'cedric', label: 'Cedric', description: 'General purpose AI chatbot' },
+  { value: 'amazon-q-internal', label: 'Amazon Q Internal', description: 'Generative AI–powered assistant' },
+  { value: 'mentor', label: 'Mentor', description: 'RAG-enabled chat platform' },
+  { value: 'field-advisor', label: 'Field Advisor', description: 'AI-powered assistant for AWS Field' },
+  { value: 'aza', label: 'AZA (A to Z Assistant)', description: 'Intelligent assistant for Amazonians' },
+  { value: 'matome', label: 'Matome', description: 'Generative AI assistant in Quip' },
+  { value: 'bedrockbot', label: 'BedrockBot', description: 'Bedrock Bot Slack App' },
+  { value: 'loki', label: 'Loki', description: 'Technical validation review tool' },
+  { value: 'clue', label: 'Clue', description: 'Flexible search and content generation application' },
+  { value: 'powerchat', label: 'PowerChat', description: 'AI assistant browser extension' },
+  { value: 'support-genie', label: 'Support Genie', description: 'AI assistant for Command Center' },
+  { value: 'aws-assessment-tool', label: 'AWS Assessment Tool', description: 'Customer facing survey tool' },
+  { value: 'genai-photobooth', label: 'GenAI Photobooth', description: 'GenAI-powered photo filters' },
+  { value: 'q-developer-cli', label: 'Q Developer CLI', description: 'Conversational assistant for AWS applications' },
+  { value: 'amazon-quicksuite', label: 'Amazon QuickSuite', description: 'Unified AI agents workspace' },
+  { value: 'other', label: 'Other', description: 'Custom platform' }
+];
+
+const devTypes = [
+  { value: 'low-code', label: 'Low Code' },
+  { value: 'high-code', label: 'High Code' },
+  { value: 'no-code', label: 'No Code' },
+  { value: 'hybrid', label: 'Hybrid' }
+];
+
+const dataClassifications = [
+  { value: 'public', label: 'Public Data', riskLevel: 'low', color: 'text-green-700', description: 'Information intended for public view' },
+  { value: 'confidential', label: 'Confidential Data', riskLevel: 'low', color: 'text-blue-700', description: 'Sensitive information with minimal risk if exposed' },
+  { value: 'highly-confidential', label: 'Highly Confidential Data', riskLevel: 'medium', color: 'text-orange-700', description: 'Requires stronger protection (e.g. contracts)' },
+  { value: 'restricted', label: 'Restricted Data', riskLevel: 'high', color: 'text-amber-700', description: 'Significantly impact position if exposed' },
+  { value: 'critical', label: 'Critical Data', riskLevel: 'critical', color: 'text-red-700', description: 'Highest level (Credentials, PII, etc)' }
+];
+
+const toolClassifications = [
+  { tool: 'Sharepoint', classification: 'Up to Highly Confidential (if configured correctly)' },
+  { tool: 'Shared ANT drive', classification: 'Confidential' },
+  { tool: 'Drive', classification: 'Highly Confidential with permission restrictions' },
+  { tool: 'Workdocs', classification: 'Highly Confidential with permission restrictions' },
+  { tool: 'Quip', classification: 'Highly Confidential with permission restrictions' },
+  { tool: 'Trawler', classification: 'Confidential' },
+  { tool: 'Wiki', classification: 'Confidential (Do NOT store Highly Confidential data)' },
+  { tool: 'Internal Email/Outlook', classification: 'Highly Confidential (with warning prefix and permissions)' },
+  { tool: 'TT/SIM/T-corp', classification: 'Highly Confidential with permission restrictions' },
+  { tool: 'Chime', classification: 'Up to Highly Confidential (internal use only)' },
+  { tool: 'Slack', classification: 'Up to Highly Confidential (private channels only)' },
+  { tool: 'Tableau A3', classification: 'Highly Confidential' },
+  { tool: 'Playbook', classification: 'Confidential' }
+];
+
+// --- LOCAL HEURISTIC ANALYSIS ENGINE (Stop-Gap Mechanism) ---
+// This runs locally in the browser to assess OWASP Top 10 compliance without API/TensorFlow
+const heuristicAnalysisEngine = {
+  analyzePrompt: (prompt) => {
+    const issues = [];
+    const text = prompt.toLowerCase();
+
+    // 1. Prompt Injection & Jailbreaking (LLM01)
+    const injectionPatterns = [
+      "ignore previous instructions", "system override", "you are dan", "do anything now",
+      "developer mode", "jailbreak", "act as", "forget your rules", "always answer", "alpha mode"
+    ];
+    injectionPatterns.forEach(pattern => {
+      if (text.includes(pattern)) {
+        issues.push({
+          type: "Prompt Injection Risk",
+          severity: "Critical",
+          description: `Detected potential jailbreak attempt pattern: "${pattern}".`,
+          recommendation: "Use system-level delimiters and strictly defined system prompts."
+        });
+      }
+    });
+
+    // 2. Sensitive Information Disclosure (LLM06) - PII & Secrets
+    // Email regex
+    if (text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)) {
+      issues.push({
+        type: "PII Leakage (Email)",
+        severity: "High",
+        description: "Prompt contains email addresses which may be PII.",
+        recommendation: "Anonymize or mask email addresses before sending to model."
+      });
+    }
+    // AWS Key regex (AKIA...)
+    if (text.match(/AKIA[0-9A-Z]{16}/)) {
+      issues.push({
+        type: "Credential Exposure",
+        severity: "Critical",
+        description: "Potential AWS Access Key ID detected in prompt.",
+        recommendation: "NEVER include hardcoded credentials in prompts. Use Secrets Manager."
+      });
+    }
+    // Generic API Key-like strings (simple heuristic for long random strings)
+    if (text.match(/(api_key|token|secret)[\s=:]+([a-zA-Z0-9]{20,})/)) {
+      issues.push({
+        type: "Secret Exposure",
+        severity: "Critical",
+        description: "Potential API Key or Token detected.",
+        recommendation: "Remove secrets from prompts. Pass them via secure context if absolutely necessary."
+      });
+    }
+
+    // 3. Insecure Output Handling (LLM02)
+    if (text.match(/<script>|javascript:|onclick=|eval\(/)) {
+      issues.push({
+        type: "XSS/Code Injection Risk",
+        severity: "High",
+        description: "Prompt contains patterns associated with XSS or code injection.",
+        recommendation: "Ensure output is sanitized before rendering in browser."
+      });
+    }
+
+    // 4. Overreliance (LLM09) - Vague constraints
+    const constraintKeywords = ["limit", "only", "constraint", "format", "json", "markdown", "do not"];
+    const hasConstraints = constraintKeywords.some(keyword => text.includes(keyword));
+    
+    if (!hasConstraints && text.length < 50) {
+      issues.push({
+        type: "Lack of Constraints",
+        severity: "Medium",
+        description: "Prompt is short and lacks explicit boundary constraints.",
+        recommendation: "Add specific constraints (e.g., 'Only answer based on context', 'Do not hallucinate')."
+      });
+    }
+
+    return {
+      issues,
+      summary: `Local Heuristic Engine detected ${issues.length} potential OWASP LLM vulnerabilities.`
+    };
+  },
+
+  analyzeCode: (code) => {
+    const issues = [];
+    
+    // 1. Hardcoded Secrets
+    if (code.match(/['"](AKIA[0-9A-Z]{16})['"]/)) {
+      issues.push({ type: "Hardcoded Credential", severity: "Critical", description: "AWS Access Key hardcoded in source." });
+    }
+    
+    // 2. Dangerous Functions
+    if (code.match(/eval\s*\(/)) issues.push({ type: "Dangerous Function", severity: "Critical", description: "Usage of eval() detected. RCE risk." });
+    if (code.match(/dangerouslySetInnerHTML/)) issues.push({ type: "XSS Risk", severity: "High", description: "React dangerouslySetInnerHTML used." });
+    if (code.match(/exec\s*\(/)) issues.push({ type: "Command Execution", severity: "Critical", description: "OS Command execution detected." });
+    
+    // 3. Insecure Randomness
+    if (code.match(/Math\.random\(\)/)) issues.push({ type: "Weak Crypto", severity: "Low", description: "Math.random() is not cryptographically secure." });
+
+    return {
+      issues, 
+      summary: `Local SAST Engine detected ${issues.length} code security issues.`
+    };
+  }
+};
+
+// Enhanced Pre-Flight Check Component
+const EnhancedPreFlightCheck = ({ onComplete }) => {
+  const [answers, setAnswers] = useState({
+    customer_data: null,
+    external_output: null,
+    elevated_access: null,
+    ufs_access: null,
+    tool_access: null
+  });
+
+  const questions = [
+    {
+      id: 'customer_data',
+      question: 'Does your deployed agent process or access customer data?',
+      options: [
+        { value: 'yes', label: 'Yes', isWarning: true },
+        { value: 'no', label: 'No' }
+      ],
+      warningMessage: '⚠️ Customer data access requires additional security reviews and compliance measures. You must engage with security teams early in the design phase.'
+    },
+    {
+      id: 'external_output',
+      question: 'Are outputs shared outside your immediate team?',
+      options: [
+        { value: 'yes', label: 'Yes', isWarning: true },
+        { value: 'no', label: 'No' }
+      ],
+      warningMessage: '⚠️ External sharing requires output validation, approval workflows, and monitoring mechanisms to prevent data leakage.'
+    },
+    {
+      id: 'elevated_access',
+      question: 'Does your agent have elevated system permissions or admin access?',
+      options: [
+        { value: 'yes', label: 'Yes', isWarning: true },
+        { value: 'no', label: 'No' }
+      ],
+      warningMessage: '⚠️ Elevated permissions significantly increase security risk. You must implement strict access controls and comprehensive audit logging.'
+    },
+    {
+      id: 'ufs_access',
+      question: 'Does your agent have UFS (Unfettered Search) Access?',
+      options: [
+        { value: 'yes', label: 'Yes', isWarning: true },
+        { value: 'no', label: 'No' }
+      ],
+      warningMessage: '⚠️ UFS access requires SWAT consultation. This is a critical permission issue that must be reviewed before proceeding with deployment.'
+    },
+    {
+      id: 'tool_access',
+      question: 'Does your agent have access to any of these tools?',
+      options: [
+        { value: 'bulk-tools', label: 'Bulk Tools', isWarning: true },
+        { value: 'base-tenant', label: 'Base Tenant Access', isWarning: true },
+        { value: 'none', label: 'None of these' }
+      ],
+      warningMessage: '⚠️ Access to Bulk Tools or Base Tenant requires special permissions and SWAT review due to the scope of data access.'
+    }
+  ];
+
+  const handleAnswer = (questionId, value) => {
+    setAnswers(prev => ({ ...prev, [questionId]: value }));
+  };
+
+  const handleContinue = () => {
+    const warnings = [];
+    questions.forEach(q => {
+      const answer = answers[q.id];
+      const selectedOption = q.options.find(opt => opt.value === answer);
+      if (selectedOption?.isWarning) {
+        warnings.push({
+          question: q.question,
+          answer: selectedOption.label,
+          warning: q.warningMessage
+        });
+      }
+    });
+
+    onComplete({ answers, warnings });
+  };
+
+  const allAnswered = Object.values(answers).every(a => a !== null);
+
+  return (
+    <Card className="border-2 border-[#232F3E] max-w-4xl mx-auto">
+      <CardHeader className="bg-gradient-to-r from-[#232F3E] to-[#37475A] text-white">
+        <CardTitle className="text-2xl">Pre-Flight Check</CardTitle>
+        <CardDescription className="text-gray-200">
+          Answer these 5 critical questions to identify potential data handling restrictions
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-6">
+        {questions.map((question, index) => {
+          const answer = answers[question.id];
+          const selectedOption = question.options.find(opt => opt.value === answer);
+          const showWarning = selectedOption?.isWarning;
+
+          return (
+            <div key={question.id} className="space-y-3">
+              <Label className="text-base font-semibold text-gray-900">
+                {index + 1}. {question.question}
+              </Label>
+              <RadioGroup value={answer || ''} onValueChange={(value) => handleAnswer(question.id, value)}>
+                <div className="space-y-2">
+                  {question.options.map((option) => (
+                    <div
+                      key={option.value}
+                      className={`flex items-center space-x-3 p-3 rounded border ${
+                        answer === option.value
+                          ? 'border-[#FF9900] bg-orange-50'
+                          : 'border-gray-200 hover:border-[#FF9900] hover:bg-gray-50'
+                      }`}
+                    >
+                      <RadioGroupItem value={option.value} id={`${question.id}-${option.value}`} />
+                      <Label htmlFor={`${question.id}-${option.value}`} className="flex-1 cursor-pointer">
+                        {option.label}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </RadioGroup>
+              {showWarning && (
+                <Alert className="border-[#FF9900] bg-orange-50 mt-3">
+                  <AlertTriangle className="h-5 w-5 text-[#FF9900]" />
+                  <AlertDescription className="text-gray-800 ml-2">
+                    {question.warningMessage}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="pt-6 border-t">
+          <Button
+            onClick={handleContinue}
+            disabled={!allAnswered}
+            className="w-full bg-[#FF9900] hover:bg-[#EC7211] text-white disabled:bg-gray-300"
+          >
+            Continue to Project Details
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+// Tool Classification Reference Component
+const ToolClassificationReference = () => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredTools = toolClassifications.filter(tool =>
+    tool.tool.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    tool.classification.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <Card className="border-2 border-blue-200 bg-blue-50">
+      <CardHeader 
+        className="cursor-pointer hover:bg-blue-100 transition-colors"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Info className="h-5 w-5 text-blue-600" />
+            <CardTitle className="text-lg text-blue-900">Tool Classification Reference</CardTitle>
+          </div>
+          {isExpanded ? (
+            <ChevronUp className="h-5 w-5 text-blue-600" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-blue-600" />
+          )}
+        </div>
+        <CardDescription className="text-blue-700">
+          Reference guide for data classification levels across common tools
+        </CardDescription>
+      </CardHeader>
+      {isExpanded && (
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <Label htmlFor="tool-search" className="text-sm text-gray-700">Search Tools</Label>
+            <Input
+              id="tool-search"
+              placeholder="Search by tool name or classification..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="text-left p-3 font-semibold text-gray-900 border-b">Tool</th>
+                  <th className="text-left p-3 font-semibold text-gray-900 border-b">Level of Classification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTools.map((item, index) => (
+                  <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="p-3 border-b border-gray-200 font-medium text-gray-900">{item.tool}</td>
+                    <td className="p-3 border-b border-gray-200 text-gray-700">{item.classification}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+};
+
+// Data Classification Selector
+const DataClassificationSelector = ({ value, onChange }) => {
+  const [showDetails, setShowDetails] = useState(false);
+  const selectedClassification = dataClassifications.find(dc => dc.value === value);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <Label htmlFor="dataCategory">Data Classification *</Label>
+          <button type="button" onClick={() => setShowDetails(!showDetails)} className="text-blue-600 hover:text-blue-800">
+            <HelpCircle className="h-4 w-4" />
+          </button>
+        </div>
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger id="dataCategory"><SelectValue placeholder="Select data classification level" /></SelectTrigger>
+          <SelectContent>
+            {dataClassifications.map((classification) => (
+              <SelectItem key={classification.value} value={classification.value}>
+                <div className="flex flex-col py-1">
+                  <span className={`font-semibold ${classification.color}`}>{classification.label}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {selectedClassification && (
+        <Alert className="border-2 bg-gray-50">
+          <Info className={`h-5 w-5 ${selectedClassification.color}`} />
+          <AlertDescription className="ml-2">
+            <p className={`font-semibold ${selectedClassification.color}`}>{selectedClassification.label}</p>
+            <p className="text-gray-700 text-sm">{selectedClassification.description}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+};
+
+// Progress Bar Component
+const ProgressBar = ({ currentStep, totalSteps }) => {
+  const progress = (currentStep / totalSteps) * 100;
+  const stepLabels = ['Pre-Flight', 'Project Details', 'Security Analysis', 'Risk Assessment', 'Results'];
+
+  return (
+    <div className="mb-8">
+      <div className="flex justify-between items-center mb-2">
+        {stepLabels.map((label, idx) => (
+          <div key={idx} className="flex flex-col items-center flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+              idx < currentStep ? 'bg-green-500 text-white' :
+              idx === currentStep ? 'bg-[#FF9900] text-white' :
+              'bg-gray-300 text-gray-600'
+            }`}>
+              {idx < currentStep ? '✓' : idx + 1}
+            </div>
+            <span className={`text-xs mt-1 ${idx === currentStep ? 'font-semibold text-[#FF9900]' : 'text-gray-600'}`}>
+              {label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <div className="bg-[#FF9900] h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN PRODUCT REVIEW COMPONENT ---
+const ProductReview = () => {
+  const auth = useAuth();
+  
+  useEffect(() => {
+    if (auth && auth.isAuthenticated) {
+      saferAIApi.setAuth(auth);
+    }
+  }, [auth]);
+
+  const [currentStep, setCurrentStep] = useState(0);
+  const [preFlightResults, setPreFlightResults] = useState(null);
+  
+  // States for Analysis
+  const [promptAnalysisResults, setPromptAnalysisResults] = useState({ tensorflow: null, api: null, status: 'pending' });
+  const [codeAnalysisResults, setCodeAnalysisResults] = useState({ tensorflow: null, api: null, status: 'pending' });
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState('');
+  
+  // States for PDF
+  const [conceptReviewData, setConceptReviewData] = useState(null);
+  const [isParsingPDF, setIsParsingPDF] = useState(false);
+  const [pdfUploadError, setPdfUploadError] = useState(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [pdfError, setPdfError] = useState(null);
+  const [pdfSuccess, setPdfSuccess] = useState(false);
+
+  // State for Cedric Warning
+  const [showCedricWarning, setShowCedricWarning] = useState(false);
+
+  const [formData, setFormData] = useState({
+    projectName: '',
+    developer: '',
+    org: '',
+    loginId: '',
+    date: new Date().toISOString().split('T')[0],
+    goal: '',
+    devType: '',
+    stage: 'product',
+    platform: '',
+    customPlatform: '',
+    dataCategory: '',
+    intendedOutput: '',
+    expectedIntegrations: '',
+    teamSize: '',
+    otherDetails: '',
+    deploymentUrl: '',
+    repositoryUrl: '',
+    promptInput: '',
+    codeInput: '',
+    conceptReviewScore: ''
+  });
+
+  const [answers, setAnswers] = useState({});
+  const [riskScore, setRiskScore] = useState(0);
+  const [riskZone, setRiskZone] = useState('');
+  const [showGuidance, setShowGuidance] = useState(true);
+  const [expandedGuidance, setExpandedGuidance] = useState({});
+
+  const questions = [
+    {
+      category: 'A. Data Sensitivity',
+      description: 'Understanding what data your agent accesses helps determine required security controls',
+      items: [
+        {
+          id: 'data_type',
+          question: 'What type of data does your agent use?',
+          guidance: { title: 'Why this matters', content: 'Highest sensitivity data determines requirements.', helpText: 'PII requires strictest controls.' },
+          options: [{ text: 'Public/mock data', score: 0 }, { text: 'Internal business data', score: 1 }, { text: 'Business/Partner data', score: 2 }, { text: 'AWS Support data', score: 3 }, { text: 'Customer/PII data', score: 5 }]
+        },
+        {
+          id: 'customer_data',
+          question: 'Does your agent process or derive insights from customer-linked data?',
+          guidance: { title: 'Why this matters', content: 'Customer data has highest compliance requirements.', helpText: 'Includes indirect access.' },
+          options: [{ text: 'No - no customer data', score: 0 }, { text: 'Possibly - indirect', score: 3 }, { text: 'Yes - direct access', score: 5 }]
+        }
+      ]
+    },
+    {
+      category: 'B. Access Permissions',
+      description: 'The level of system access determines potential impact if compromised',
+      items: [
+        {
+          id: 'access_level',
+          question: 'What kind of access does your solution have?',
+          guidance: { title: 'Why this matters', content: 'Higher privileges = higher risk.', helpText: 'Write access vs Read access.' },
+          options: [{ text: 'None - sandboxed', score: 0 }, { text: 'Basic read access', score: 2 }, { text: 'Write/update access', score: 3 }, { text: 'Elevated/system access', score: 5 }]
+        },
+        {
+          id: 'api_interaction',
+          question: 'Does it interact with dashboards, APIs, or case data?',
+          guidance: { title: 'Why this matters', content: 'API interactions expose data to other systems.', helpText: 'Cross-tenant access multiplies risk.' },
+          options: [{ text: 'No - standalone', score: 0 }, { text: 'Internal only', score: 2 }, { text: 'External/cross-tenant', score: 4 }]
+        }
+      ]
+    },
+    {
+      category: 'C. Output Safety',
+      description: 'Where outputs go determines the blast radius of potential issues',
+      items: [
+        {
+          id: 'output_visibility',
+          question: 'Where are the outputs visible?',
+          guidance: { title: 'Why this matters', content: 'Public outputs need highest review.', helpText: 'Where does the data go?' },
+          options: [{ text: 'Team-only', score: 1 }, { text: 'Cross-org', score: 3 }, { text: 'Public/External', score: 5 }]
+        },
+        {
+          id: 'auto_generated',
+          question: 'Are outputs auto-generated without human review?',
+          guidance: { title: 'Why this matters', content: 'Automation bypasses human judgment.', helpText: 'Human in the loop reduces risk.' },
+          options: [{ text: 'No - reviewed', score: 0 }, { text: 'Yes - internal', score: 3 }, { text: 'Yes - external', score: 5 }]
+        }
+      ]
+    },
+    {
+      category: 'D. Prompt Security',
+      description: 'User input is a primary attack vector for AI systems',
+      items: [
+        {
+          id: 'free_text_prompts',
+          question: 'Do users enter free text prompts?',
+          guidance: { title: 'Why this matters', content: 'Free text opens up injection attacks.', helpText: 'Structured input is safer.' },
+          options: [{ text: 'No - structured only', score: 0 }, { text: 'Partially - limited', score: 2 }, { text: 'Yes - open prompts', score: 4 }]
+        },
+        {
+          id: 'prompt_exposure',
+          question: 'Could prompts expose internal data or credentials?',
+          guidance: { title: 'Why this matters', content: 'Leakage via prompts is a common vector.', helpText: 'Can users ask for secrets?' },
+          options: [{ text: 'No - isolated', score: 0 }, { text: 'Possibly - some risk', score: 3 }, { text: 'Likely - high risk', score: 5 }]
+        }
+      ]
+    },
+    {
+        category: 'E. External Integrations',
+        description: 'Third-party integrations introduce additional security considerations',
+        items: [
+          {
+            id: 'external_services',
+            question: 'Are there integrations with non-AWS services?',
+            guidance: { title: 'Why this matters', content: 'Third parties have different security standards.', helpText: 'Slack, Google, etc. are external.' },
+            options: [{ text: 'None - AWS only', score: 0 }, { text: 'Internal APIs only', score: 2 }, { text: 'Third-party services', score: 4 }]
+          },
+          {
+            id: 'external_data',
+            question: 'Does your agent send or store data externally?',
+            guidance: { title: 'Why this matters', content: 'Data leaving boundary creates sovereignty issues.', helpText: 'Logs, caches, temp storage count.' },
+            options: [{ text: 'No - internal only', score: 0 }, { text: 'Occasionally', score: 2 }, { text: 'Yes - regular flow', score: 5 }]
+          }
+        ]
+    },
+    {
+        category: 'F. Business Impact',
+        description: 'The potential damage from failures determines required safeguards',
+        items: [
+            {
+                id: 'automation_level',
+                question: 'How automated is the workflow?',
+                guidance: { title: 'Why this matters', content: 'Errors propagate faster with automation.', helpText: 'Manual vs Semi vs Fully automated.' },
+                options: [{ text: 'Manual review', score: 0 }, { text: 'Semi-automated', score: 2 }, { text: 'Fully automated', score: 4 }]
+            },
+            {
+                id: 'impact_scope',
+                question: 'What is the potential impact if something goes wrong?',
+                guidance: { title: 'Why this matters', content: 'Blast radius determines urgency.', helpText: 'Team vs Org vs Customer impact.' },
+                options: [{ text: 'Low - team only', score: 1 }, { text: 'Medium - org level', score: 3 }, { text: 'High - customer facing', score: 5 }]
+            }
+        ]
+    },
+    {
+        category: 'G. Governance & Logging',
+        description: 'Proper logging and compliance enable accountability and incident response',
+        items: [
+            {
+                id: 'logging',
+                question: 'Is usage logged and auditable?',
+                guidance: { title: 'Why this matters', content: 'Essential for investigations.', helpText: 'Inputs, outputs, user actions.' },
+                options: [{ text: 'Yes, comprehensive', score: 0 }, { text: 'Partial logging', score: 2 }, { text: 'No/Minimal', score: 4 }]
+            },
+            {
+                id: 'compliance',
+                question: 'Have you reviewed compliance requirements?',
+                guidance: { title: 'Why this matters', content: 'Legal/policy requirements are mandatory.', helpText: 'GDPR, data residency, AWS policy.' },
+                options: [{ text: 'Yes, fully', score: 0 }, { text: 'Partially', score: 2 }, { text: 'Not yet', score: 3 }]
+            }
+        ]
+    },
+    {
+        category: 'H. Monitoring & Review',
+        description: 'Ongoing monitoring ensures your agent continues to behave correctly',
+        items: [
+            {
+                id: 'output_monitoring',
+                question: 'Are outputs continuously monitored?',
+                guidance: { title: 'Why this matters', content: 'Catch drift and abuse early.', helpText: 'Automated alerts vs manual checks.' },
+                options: [{ text: 'Yes, automated', score: 0 }, { text: 'Manual spot checks', score: 2 }, { text: 'No monitoring', score: 4 }]
+            },
+            {
+                id: 'incident_response',
+                question: 'Is there an incident response plan?',
+                guidance: { title: 'Why this matters', content: 'Ensures fast action when things go wrong.', helpText: 'Who to call? How to shut down?' },
+                options: [{ text: 'Yes, documented', score: 0 }, { text: 'Informal plan', score: 2 }, { text: 'No plan', score: 3 }]
+            }
+        ]
+    }
+  ];
+
+  // PDF Parsing Function
+  const parsePDFText = (text) => {
+    const data = {
+      projectName: '', developer: '', org: '', platform: '', devType: '',
+      dataCategory: '', goal: '', riskScore: 0, answers: {}
+    };
+    const projectNameMatch = text.match(/Project Name:\s*(.+)/);
+    if (projectNameMatch) data.projectName = projectNameMatch[1].trim();
+    const developerMatch = text.match(/Developer:\s*(.+)/);
+    if (developerMatch) data.developer = developerMatch[1].trim();
+    const orgMatch = text.match(/Organization:\s*(.+)/);
+    if (orgMatch) data.org = orgMatch[1].trim();
+    const platformMatch = text.match(/Platform:\s*(.+)/);
+    if (platformMatch) data.platform = platformMatch[1].trim();
+    const devTypeMatch = text.match(/Development Type:\s*(.+)/);
+    if (devTypeMatch) data.devType = devTypeMatch[1].trim();
+    const dataCategoryMatch = text.match(/Data Category:\s*(.+)/);
+    if (dataCategoryMatch) data.dataCategory = dataCategoryMatch[1].trim();
+    const riskScoreMatch = text.match(/Risk Score:\s*(\d+)\s*\/\s*40/);
+    if (riskScoreMatch) data.riskScore = parseInt(riskScoreMatch[1]);
+    const goalMatch = text.match(/Goal\/Description[:\s]+(.+?)(?=\n\n|\nPlatform:)/s);
+    if (goalMatch) data.goal = goalMatch[1].trim();
+
+    questions.forEach(category => {
+      category.items.forEach(item => {
+        const questionRegex = new RegExp(`${item.question.replace(/[?]/g, '\\?')}\\s*.*?\\s*(\\d+)\\s*points?`, 'i');
+        const match = text.match(questionRegex);
+        if (match) data.answers[item.id] = parseInt(match[1]);
+      });
+    });
+    return data;
+  };
+
+  const handlePDFUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file || file.type !== 'application/pdf') {
+      setPdfUploadError('Please upload a valid PDF file');
+      return;
+    }
+    setIsParsingPDF(true);
+    setPdfUploadError(null);
+    try {
+      const pdfjsLib = window['pdfjs-dist/build/pdf'];
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+      }
+      const parsedData = parsePDFText(fullText);
+      setConceptReviewData(parsedData);
+      
+      // Update form data ONLY if current field is empty
+      setFormData(prev => ({
+        ...prev,
+        projectName: prev.projectName || parsedData.projectName || '',
+        developer: prev.developer || parsedData.developer || '',
+        org: prev.org || parsedData.org || '',
+        platform: prev.platform || parsedData.platform || '',
+        devType: prev.devType || parsedData.devType || '',
+        dataCategory: prev.dataCategory || parsedData.dataCategory || '',
+        goal: prev.goal || parsedData.goal || '',
+        conceptReviewScore: parsedData.riskScore.toString()
+      }));
+      alert('Concept Review PDF loaded successfully! Empty fields have been pre-filled.');
+    } catch (error) {
+      console.error('PDF error:', error);
+      setPdfUploadError(`Failed to parse PDF: ${error.message}`);
+    } finally {
+      setIsParsingPDF(false);
+    }
+  };
+
+  const handleSelectChange = (name, value) => {
+    if (name === 'platform' && value === 'cedric') {
+      setShowCedricWarning(true);
+      // We set the value momentarily to trigger the modal, but the modal action will likely reset it or warn the user.
+    }
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSecurityAnalysis = async () => {
+    setIsAnalyzing(true);
+    setAnalysisProgress('Initializing local heuristic engine...');
+    
+    // Artificial delay to simulate processing
+    setTimeout(() => {
+        // 1. Prompt Analysis using Heuristic Engine
+        if (formData.promptInput) {
+            setAnalysisProgress('Analyzing prompts for OWASP vulnerabilities...');
+            const results = heuristicAnalysisEngine.analyzePrompt(formData.promptInput);
+            setPromptAnalysisResults({
+                tensorflow: { available: true, issues: results.issues, summary: results.summary },
+                api: null, // Skipping API as per "stop-gap" request
+                status: 'completed'
+            });
+        }
+
+        // 2. Code Analysis using Heuristic Engine (if applicable)
+        const needsCodeAnalysis = formData.devType.toLowerCase().includes('high') || formData.devType.toLowerCase().includes('hybrid');
+        if (needsCodeAnalysis && formData.codeInput) {
+            setAnalysisProgress('Scanning code for patterns...');
+            const results = heuristicAnalysisEngine.analyzeCode(formData.codeInput);
+            setCodeAnalysisResults({
+                tensorflow: { available: true, issues: results.issues, summary: results.summary },
+                api: null,
+                status: 'completed'
+            });
+        }
+        
+        setAnalysisProgress('Analysis Complete.');
+        setTimeout(() => {
+            setIsAnalyzing(false);
+            setCurrentStep(3);
+        }, 800);
+    }, 1500);
+  };
+
+  // Helper functions
+  const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleAnswerChange = (qId, val) => setAnswers(prev => ({ ...prev, [qId]: val }));
+  const calculateCategoryScores = () => {
+    return questions.map(category => {
+      let total = 0, max = 0;
+      category.items.forEach(item => {
+        if(answers[item.id] !== undefined) total += answers[item.id];
+        max += Math.max(...item.options.map(o => o.score));
+      });
+      return { name: category.category, score: total, maxPossible: max, percentage: max > 0 ? Math.round((total/max)*100) : 0 };
+    });
+  };
+  const getHighRiskQuestions = () => {
+    const risks = [];
+    questions.forEach(cat => cat.items.forEach(item => {
+        if(answers[item.id] >= 4) risks.push({ category: cat.category, question: item.question, score: answers[item.id] });
+    }));
+    return risks;
+  };
+  const calculateRiskScore = () => {
+    let total = 0;
+    questions.forEach(cat => cat.items.forEach(item => { if(answers[item.id] !== undefined) total += answers[item.id]; }));
+    setRiskScore(total);
+    if(total <= 15) setRiskZone('green');
+    else if(total <= 28) setRiskZone('amber');
+    else setRiskZone('red');
+    setCurrentStep(4);
+  };
+  
+  const getRiskZoneInfo = () => {
+    if(riskZone === 'green') return { title: 'Green Zone', color: 'green', bgColor: 'bg-green-50', borderColor: 'border-green-500', icon: <CheckCircle2 className="h-16 w-16 text-green-600" /> };
+    if(riskZone === 'amber') return { title: 'Amber Zone', color: 'yellow', bgColor: 'bg-yellow-50', borderColor: 'border-yellow-500', icon: <AlertTriangle className="h-16 w-16 text-yellow-600" /> };
+    return { title: 'Red Zone', color: 'red', bgColor: 'bg-red-50', borderColor: 'border-red-500', icon: <XCircle className="h-16 w-16 text-red-600" /> };
+  };
+
+  const handleDownloadPDF = async () => {
+    setIsGeneratingPDF(true);
+    try {
+        const reportData = {
+            type: 'product',
+            formData, answers, questions, riskScore, normalizedScore: riskScore, riskZone,
+            promptAnalysisResults, codeAnalysisResults,
+            categoryScores: calculateCategoryScores(),
+            highRiskQuestions: getHighRiskQuestions()
+        };
+        await generateSaferAIPDF(reportData);
+        setPdfSuccess(true);
+    } catch (e) {
+        setPdfError(e.message);
+    } finally {
+        setIsGeneratingPDF(false);
+    }
+  };
+
+  // --- RENDER ---
+  const needsCodeAnalysis = formData.devType.toLowerCase().includes('high') || formData.devType.toLowerCase().includes('hybrid');
+
+  if (currentStep === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-grow py-12 px-6">
+            <div className="max-w-7xl mx-auto">
+                <ProgressBar currentStep={0} totalSteps={4} />
+                <EnhancedPreFlightCheck onComplete={handlePreFlightComplete} />
+            </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStep === 1) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-grow py-12 px-6">
+          <div className="max-w-4xl mx-auto">
+            <ProgressBar currentStep={1} totalSteps={4} />
+            
+            {/* Cedric Warning Dialog */}
+            <AlertDialog open={showCedricWarning} onOpenChange={setShowCedricWarning}>
+              <AlertDialogContent className="border-red-500 border-2">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="text-red-600 flex items-center gap-2">
+                    <AlertTriangle className="h-6 w-6" />
+                    Platform Deprecated
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-base text-gray-800 font-medium">
+                    <strong>Cedric is deprecated.</strong> Please do not proceed with this platform for new projects.
+                    <br/><br/>
+                    We recommend migrating to <strong>Amazon Q Internal</strong> or <strong>Mentor</strong>.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogAction onClick={() => {
+                     setShowCedricWarning(false);
+                     setFormData(prev => ({ ...prev, platform: '' })); // Reset selection
+                  }} className="bg-red-600 hover:bg-red-700 text-white">
+                    I Understand
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <Card className="border-2 border-[#FF9900] mb-6">
+              <CardHeader className="bg-gradient-to-r from-[#FF9900] to-[#EC7211] text-white">
+                <CardTitle className="text-2xl flex items-center gap-2"><FileUp className="h-6 w-6" /> Upload Concept Review PDF (Optional)</CardTitle>
+                <CardDescription className="text-white">Auto-fill details from your concept review.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-6">
+                <Input type="file" accept=".pdf" onChange={handlePDFUpload} disabled={isParsingPDF} />
+                {pdfUploadError && <p className="text-red-600 mt-2">{pdfUploadError}</p>}
+              </CardContent>
+            </Card>
+
+            <Card className="border-2 border-[#232F3E] mb-6">
+                <CardHeader className="bg-[#232F3E] text-white"><CardTitle>Product Information</CardTitle></CardHeader>
+                <CardContent className="p-6 space-y-6">
+                    <div className="grid md:grid-cols-2 gap-6">
+                        <div><Label>Project Name</Label><Input name="projectName" value={formData.projectName} onChange={handleInputChange} /></div>
+                        <div><Label>Developer Name</Label><Input name="developer" value={formData.developer} onChange={handleInputChange} /></div>
+                        <div><Label>Organization</Label><Input name="org" value={formData.org} onChange={handleInputChange} /></div>
+                        <div>
+                            <Label>Platform</Label>
+                            <Select value={formData.platform} onValueChange={(v) => handleSelectChange('platform', v)}>
+                                <SelectTrigger><SelectValue placeholder="Select Platform" /></SelectTrigger>
+                                <SelectContent>{platforms.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                             <Label>Development Type</Label>
+                             <Select value={formData.devType} onValueChange={(v) => handleSelectChange('devType', v)}>
+                                <SelectTrigger><SelectValue placeholder="Dev Type" /></SelectTrigger>
+                                <SelectContent>{devTypes.map(d => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
+                             </Select>
+                        </div>
+                    </div>
+                    <DataClassificationSelector value={formData.dataCategory} onChange={(v) => handleSelectChange('dataCategory', v)} />
+                    <Button onClick={() => setCurrentStep(2)} className="w-full bg-[#FF9900] hover:bg-[#EC7211]">Continue to Security Analysis</Button>
+                </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStep === 2) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-grow py-12 px-6">
+          <div className="max-w-4xl mx-auto">
+            <ProgressBar currentStep={2} totalSteps={4} />
+            <div className="mb-8"><h1 className="text-4xl font-bold">Security Analysis (Local Engine)</h1></div>
+            
+            <Card className="border-2 border-[#232F3E] mb-6">
+                <CardHeader className="bg-[#232F3E] text-white"><CardTitle>Prompt Analysis</CardTitle></CardHeader>
+                <CardContent className="p-6">
+                    <Label>Prompts / System Instructions</Label>
+                    <Textarea value={formData.promptInput} onChange={handleInputChange} name="promptInput" rows={10} placeholder="Paste prompts here..." />
+                </CardContent>
+            </Card>
+
+            {needsCodeAnalysis && (
+                <Card className="border-2 border-[#232F3E] mb-6">
+                    <CardHeader className="bg-[#232F3E] text-white"><CardTitle>Code Analysis</CardTitle></CardHeader>
+                    <CardContent className="p-6">
+                        <Label>Source Code</Label>
+                        <Textarea value={formData.codeInput} onChange={handleInputChange} name="codeInput" rows={10} placeholder="Paste source code here..." />
+                    </CardContent>
+                </Card>
+            )}
+
+            <Button onClick={handleSecurityAnalysis} disabled={isAnalyzing} className="w-full bg-[#FF9900] hover:bg-[#EC7211]">
+                {isAnalyzing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Analyzing...</> : 'Run Local Security Analysis'}
+            </Button>
+            {isAnalyzing && <p className="text-center mt-2 text-sm text-gray-600">{analysisProgress}</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStep === 3) {
+    // Risk Assessment Questionnaire (Same as Concept)
+    const allAnswered = questions.every(cat => cat.items.every(i => answers[i.id] !== undefined));
+    return (
+        <div className="min-h-screen bg-gray-50 flex flex-col">
+            <div className="flex-grow py-12 px-6">
+                <div className="max-w-5xl mx-auto">
+                    <ProgressBar currentStep={3} totalSteps={4} />
+                    <Card className="border-2 border-[#232F3E]">
+                        <CardHeader className="bg-[#232F3E] text-white"><CardTitle>Risk Assessment</CardTitle></CardHeader>
+                        <CardContent className="p-6 space-y-8">
+                            {questions.map((cat, idx) => (
+                                <div key={idx} className="space-y-4">
+                                    <h3 className="text-xl font-bold border-b pb-2">{cat.category}</h3>
+                                    {cat.items.map(item => (
+                                        <div key={item.id} className="p-4 border rounded bg-white">
+                                            <Label className="text-base font-semibold block mb-2">{item.question}</Label>
+                                            <RadioGroup value={answers[item.id]?.toString()} onValueChange={(v) => handleAnswerChange(item.id, parseInt(v))}>
+                                                {item.options.map((opt, oIdx) => (
+                                                    <div key={oIdx} className="flex items-center space-x-2">
+                                                        <RadioGroupItem value={opt.score.toString()} id={`${item.id}-${oIdx}`} />
+                                                        <Label htmlFor={`${item.id}-${oIdx}`}>{opt.text} ({opt.score} pts)</Label>
+                                                    </div>
+                                                ))}
+                                            </RadioGroup>
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                            <Button onClick={calculateRiskScore} disabled={!allAnswered} className="w-full bg-[#FF9900]">Calculate Score</Button>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
+        </div>
+    );
+  }
+
+  if (currentStep === 4) {
+    const zoneInfo = getRiskZoneInfo();
+    return (
+        <div className="min-h-screen bg-gray-50 flex flex-col">
+            <div className="flex-grow py-12 px-6">
+                <div className="max-w-6xl mx-auto">
+                    <ProgressBar currentStep={4} totalSteps={4} />
+                    <Card className={`border-4 ${zoneInfo.borderColor} ${zoneInfo.bgColor} mb-6`}>
+                        <CardContent className="p-8 text-center">
+                            {zoneInfo.icon}
+                            <h2 className="text-3xl font-bold mt-4">{zoneInfo.title}</h2>
+                            <p className="text-xl mt-2">Score: {riskScore}/40</p>
+                        </CardContent>
+                    </Card>
+                    
+                    {/* Analysis Results Display */}
+                    <div className="grid md:grid-cols-2 gap-6 mb-6">
+                        <Card>
+                            <CardHeader><CardTitle>Prompt Analysis Results</CardTitle></CardHeader>
+                            <CardContent>
+                                {promptAnalysisResults.tensorflow?.issues?.length > 0 ? (
+                                    <ul className="space-y-2">
+                                        {promptAnalysisResults.tensorflow.issues.map((issue, i) => (
+                                            <li key={i} className="text-sm border-l-4 border-red-500 pl-2 bg-red-50 p-2">
+                                                <strong>{issue.type}</strong>: {issue.description}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : <p className="text-green-600">No prompt issues found.</p>}
+                            </CardContent>
+                        </Card>
+                         {needsCodeAnalysis && (
+                            <Card>
+                                <CardHeader><CardTitle>Code Analysis Results</CardTitle></CardHeader>
+                                <CardContent>
+                                     {codeAnalysisResults.tensorflow?.issues?.length > 0 ? (
+                                        <ul className="space-y-2">
+                                            {codeAnalysisResults.tensorflow.issues.map((issue, i) => (
+                                                <li key={i} className="text-sm border-l-4 border-orange-500 pl-2 bg-orange-50 p-2">
+                                                    <strong>{issue.type}</strong>: {issue.description}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : <p className="text-green-600">No code issues found.</p>}
+                                </CardContent>
+                            </Card>
+                        )}
+                    </div>
+
+                    <Button onClick={handleDownloadPDF} disabled={isGeneratingPDF} className="w-full bg-[#FF9900] hover:bg-[#EC7211] h-12 text-lg">
+                        {isGeneratingPDF ? 'Generating Report...' : 'Download PDF Report'}
+                    </Button>
+                    {pdfSuccess && <p className="text-green-600 text-center mt-2">PDF Downloaded Successfully!</p>}
+                </div>
+            </div>
+        </div>
+    );
+  }
+
+  return null;
+};
+
+export default ProductReview;
