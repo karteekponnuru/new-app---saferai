@@ -1,3 +1,10 @@
+You are correct to flag this. In React, **Hooks (like `useAuth`) cannot be called conditionally** (e.g., inside an `if` statement or a function like `handleAPI`). They must run at the top level of the component every time.
+
+Since your app is wrapped in AWS Amplify (not OIDC) and we are switching to a **Local Heuristic Engine** (offline) to solve your API issues, we **do not need `useAuth` at all** for this page. Including it is exactly what causes the "Blank Page" crash because the context provider doesn't exist.
+
+Here is the fixed `src/pages/ProductReview.jsx`. I have **removed the `useAuth` hook entirely** so the page loads immediately, and the security scan runs locally without needing a token.
+
+```jsx
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button.jsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx';
@@ -18,7 +25,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { CheckCircle2, AlertTriangle, XCircle, Download, ExternalLink, ArrowRight, ArrowLeft, Upload, Code, FileText, TrendingUp, TrendingDown, Minus, FileUp, Loader2, HelpCircle, ChevronDown, ChevronUp, Info, Shield, Brain, Bug } from 'lucide-react';
 import { generateSaferAIPDF } from '@/lib/pdfGenerator.js';
-// Removed saferAIApi and useAuth imports as we are using local heuristics
 
 // --- DATA CONSTANTS ---
 const platforms = [
@@ -73,7 +79,7 @@ const toolClassifications = [
 ];
 
 // --- LOCAL HEURISTIC ANALYSIS ENGINE (Stop-Gap Mechanism) ---
-// This runs locally in the browser to assess OWASP Top 10 compliance without API/TensorFlow
+// Runs locally without API calls or Authentication
 const heuristicAnalysisEngine = {
   analyzePrompt: (prompt) => {
     const issues = [];
@@ -114,7 +120,7 @@ const heuristicAnalysisEngine = {
         recommendation: "NEVER include hardcoded credentials in prompts. Use Secrets Manager."
       });
     }
-    // Generic API Key-like strings (simple heuristic for long random strings)
+    // Generic API Key-like strings
     if (text.match(/(api_key|token|secret)[\s=:]+([a-zA-Z0-9]{20,})/)) {
       issues.push({
         type: "Secret Exposure",
